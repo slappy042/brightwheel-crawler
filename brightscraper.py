@@ -4,6 +4,7 @@ import time
 import yaml
 import argparse
 import random
+import datetime
 
 import requests
 import undetected_chromedriver as uc
@@ -37,6 +38,8 @@ console_handler.setLevel(logging.INFO)
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
+
+IMAGES_REGEX = r'(?<=href=\")(?P<url>https:\/\/cdn\.mybrightwheel\.com\/media_images\/images\/([0-9a-zA-Z]+\/)*(?P<filename>[0-9a-zA-Z]+)\.(?P<extension>jpg|png))\?(?P<timestamp>\d+)(?="?)'
 
 def config_parser():
     """parse config file in config.yml if present"""
@@ -100,6 +103,7 @@ def pic_finder(browser, kidlist_url, startdate, enddate, args):
             raise Exception("No student URLs found")
         if args.student_number:
             profile_url = students[args.student_number - 1].get_property("href")
+            student_name = students[args.student_number - 1].text.replace(' "1"','')
         else:
             try:
                 logger.info("Select a student:")
@@ -107,6 +111,7 @@ def pic_finder(browser, kidlist_url, startdate, enddate, args):
                     logger.info(f"{i}. {student.text}")
                 selection = int(input("Enter a number: "))
                 profile_url = students[selection].get_property("href")
+                student_name = students[selection].text.replace(' "1"','')
                 # Replace last part of url path with feed
             except Exception as e:
                 logger.error(f"[!] - Unable to find student: {e}")
@@ -168,20 +173,26 @@ def pic_finder(browser, kidlist_url, startdate, enddate, args):
     except ElementNotVisibleException:
         logger.info("none")
 
-    matches = re.findall(
-        r'(?<=href=\")https:\/\/cdn\.mybrightwheel\.com\/media_images\/images\/[0-9a-zA-Z\/]*\.(?:jpg|png)(?="?)',
+    matches = re.finditer(
+        IMAGES_REGEX,
         browser.page_source,
     )
-    count_matches = len(matches)
-    if count_matches == 0:
-        logger.error("[!] No Images found to download! Check the source target page")
-    else:
-        logger.info("[!] Found {} files to download...".format(count_matches))
 
-    return browser, matches
+    return browser, matches, student_name
 
 
-def get_images(browser, matches):
+def pic_finder_already_loaded(browser, kidlist_url, startdate, enddate, args):
+    """This is a shortcut function used when the browser has already loaded the entire feed.
+    """
+    student_name = browser.find_element(By.XPATH, '//div[@data-item="HEADING"]').text.replace(' "1"','')
+    matches = re.finditer(
+        IMAGES_REGEX,
+        browser.page_source,
+    )
+    return browser, matches, student_name
+
+
+def get_images(browser, matches, student_name):
     """Since Selenium doesn't handle saving images well, requests
     can do this for us, but we need to pass it the cookies"""
     cookies = browser.get_cookies()
@@ -191,13 +202,20 @@ def get_images(browser, matches):
         session.cookies.set(cookie["name"], cookie["value"])
 
     for match in matches:
+        # all EXIF data has been removed from files
+        # we want timestamp in filename for exiftool to parse as per https://exiftool.org/faq.html#Q5
+        # let's name the files like <student_name>_<timestamp>.jpg
+        timestamp_str = datetime.datetime.fromtimestamp(int(match.group('timestamp')), datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
+        student_name = student_name.replace(" ","_")
+        filename = f"{student_name}_{timestamp_str}_{match.group('filename')}.{match.group('extension')}"
+        # filename = f"{match.group('filename')}_{match.group('timestamp')}.{match.group('extension')}"
+        url = match.group('url')
         try:
-            filename = match.split("/")[-1]
-            request = session.get(match)
+            request = session.get(url)
             open("./pics/" + filename, "wb").write(request.content)
-            logger.info("[-] - Downloading {}".format(filename))
-        except:
-            logger.error("[!] - Failed to save {}".format(match))
+            logger.info(f"[-] - Downloading {filename}")
+        except Exception as e:
+            logger.error(f"[!] - Failed to save {filename} from {url}: {e}")
 
     try:
         session.cookies.clear()
@@ -230,13 +248,15 @@ def main():
     group.add_argument("-c", "--chrome-selenium", action="store_true", help="Use existing Chrome session to login to Brightwheel")
     group.add_argument("-e", "--chrome-session", action="store_true", help="Use existing Chrome session to login to Brightwheel")
     parser.add_argument(
-        "-n", "--student-number", type=int, help="Select a student by number, indexed starting at 0. Look at the student list and count in order"
+        "-n", "--student-number", type=int, help="Select a student by number, indexed starting at 1. Look at the student list and count in order"
     )
     args = parser.parse_args()
 
+    logger.info(f"Running with args {args}")
+
     if args.chrome_selenium:
         browser = use_chrome_selenium()
-    elif args.chrome - session:
+    elif args.chrome_session:
         browser = use_existing_chrome_session()
     else:
         logger.error("[!] - No browser selected, exiting")
@@ -253,11 +273,21 @@ def main():
         logger.error("[!] - Check config file, missing required values")
         raise SystemExit
 
-    session = signme_in(browser, username, password, signin_url)
+    if args.chrome_selenium:
+        session = signme_in(browser, username, password, signin_url)
+    else:
+        session = browser
 
-    session, matches = pic_finder(session, kidlist_url, startdate, enddate, args)
+    if "/feed" in browser.current_url:
+        # use this when the full page is already loaded in your debug chrome browser (as from a failed run)
+        # THIS ASSUMES THE FULL FEED WAS LOADED IF YOU ARE ON THIS PAGE WHEN RUNNING THE SCRIPT
+        logger.info("looks like feed is already loaded")
+        session, matches, student_name = pic_finder_already_loaded(session, kidlist_url, startdate, enddate, args)
+    else:
+        session, matches, student_name = pic_finder(session, kidlist_url, startdate, enddate, args)
 
-    get_images(session, matches)
+
+    get_images(session, matches, student_name)
 
 
 if __name__ == "__main__":

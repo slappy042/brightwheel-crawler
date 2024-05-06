@@ -44,3 +44,20 @@ I _used to_ want to add image recognition to this to be able to parse out my kid
 ### rename.py
 
 This is a script to get the exifdata from the image and rename the file to be prefixed by the date. This should help sorting them if you do that. You need exiftool installed for it to work. I tried using exifreader and pillow and neither worked for me :shrug:
+
+### rename timestamped files
+
+`https://photo.stackexchange.com/a/126978`
+
+```
+cd pics
+# reads UTC timestamp from filename, puts into standard date tags
+exiftool -overwrite_original "-alldates<filename" .
+
+# copies into GPS tags for Google Photos
+exiftool -overwrite_original "-GPSTimeStamp<DateTimeOriginal" .
+exiftool -overwrite_original "-GPSDateStamp<DateTimeOriginal" .
+
+# timeshift standard date tags to PST
+exiftool -overwrite_original "-alldates-=8" .
+```
