@@ -82,24 +82,24 @@ def get_random_time():
 
 
 # Get the first URL and populate the fields
-def signme_in(browser, username, password, signin_url):
+def signme_in(browser, config: Config):
     """Populate and send login info using U/P from config"""
 
-    browser.get(signin_url)
+    browser.get(config.signin_url)
     time.sleep(get_random_time())
     loginuser = browser.find_element(By.XPATH, '//input[@id="username"]')
     loginpass = browser.find_element(By.ID, "password")
     loginuser.click()
     time.sleep(get_random_time())
-    loginuser.send_keys(username)
+    loginuser.send_keys(config.username)
     loginpass.click()
     time.sleep(get_random_time())
-    loginpass.send_keys(password)
+    loginpass.send_keys(config.password)
 
     # Submit login, have to wait for page to change
     try:
         loginpass.submit()
-        WebDriverWait(browser, 45).until(EC.url_changes(signin_url))
+        WebDriverWait(browser, 45).until(EC.url_changes(config.signin_url))
     except:
         logger.error("[!] - Unable to authenticate - Check credentials")
         raise SystemExit
