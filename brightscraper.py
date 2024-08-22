@@ -59,16 +59,16 @@ class Student:
 class Config(yaml.YAMLObject):
     yaml_tag = u'!Config'
     yaml_loader=yaml.SafeLoader
-    username:  str
-    password: str
-    guardian_id: str | None
-    child_ids: list[Student] | None
-    signin_url: str
-    kidlist_url: str
-    start_date: datetime
+    bwuser:  str
+    bwpass: str
+    guardianid: str | None
+    childids: list[Student] | None
+    bwsignin: str
+    bwlist: str
+    startdate: datetime
     end_date: datetime
-    start_page:int | None
-    page_size:int | None
+    startpage:int | None
+    pagesize:int | None
     timezone: ZoneInfo | None
 
     def __init__(
@@ -85,25 +85,30 @@ class Config(yaml.YAMLObject):
             pagesize = 10, 
             timezone = "UTC",
     ) -> None:
-        self.username = bwuser
+        self.bwuser = bwuser
         self.password = bwpass
-        self.guardian_id = guardianid
-        self.child_ids = childids
-        self.signin_url = bwsignin
-        self.kidlist_url = bwlist
-        self.start_date = datetime.strptime(startdate, "%m/%d/%Y")
-        self.end_date = datetime.strptime(enddate, "%m/%d/%Y")
-        self.start_page = startpage
+        self.guardianid = guardianid
+        self.childids = childids
+        self.bwsignin = bwsignin
+        self.bwlist = bwlist
+        self.startdate = datetime.strptime(startdate, "%m/%d/%Y")
+        self.enddate = datetime.strptime(enddate, "%m/%d/%Y")
+        self.startpage = startpage
         self.page_size = pagesize
         self.timezone = ZoneInfo(timezone)
+    
+    def __repr__(self):
+        return "%s(username=%r, signin_url=%r, start_date=%r, timezone=%r)" % (
+            self.__class__.__name__, self.bwuser, self.bwsignin, self.startdate, self.timezone)
 
 def config_parser() -> Config:
     """parse config file in config.yml if present"""
 
     try:
         with open("config.yml", "r") as bw_config:
-            return yaml.safe_load(bw_config)
-            
+            config = yaml.safe_load(bw_config)
+            logger.info("Config loaded %s", config)            
+                        
     except FileNotFoundError:
         logger.error("[!] No config file found, check config file!")
         raise SystemExit
@@ -111,6 +116,8 @@ def config_parser() -> Config:
     except KeyError:
         logger.error("[!] - Check config file, missing required values")
         raise SystemExit
+    
+    return config
 
 
 def get_random_time():
@@ -123,21 +130,21 @@ def get_random_time():
 def signme_in(browser, config: Config):
     """Populate and send login info using U/P from config"""
 
-    browser.get(config.signin_url)
+    browser.get(config.bwsignin)
     time.sleep(get_random_time())
     loginuser = browser.find_element(By.XPATH, '//input[@id="username"]')
     loginpass = browser.find_element(By.ID, "password")
     loginuser.click()
     time.sleep(get_random_time())
-    loginuser.send_keys(config.username)
+    loginuser.send_keys(config.bwuser)
     loginpass.click()
     time.sleep(get_random_time())
-    loginpass.send_keys(config.password)
+    loginpass.send_keys(config.bwpass)
 
     # Submit login, have to wait for page to change
     try:
         loginpass.submit()
-        WebDriverWait(browser, 45).until(EC.url_changes(config.signin_url))
+        WebDriverWait(browser, 45).until(EC.url_changes(config.bwsignin))
     except:
         logger.error("[!] - Unable to authenticate - Check credentials")
         raise SystemExit
@@ -189,10 +196,10 @@ def get_activities(session: webdriver.Chrome, id: str, page: int, page_size: int
         raise SystemExit
     return activity_list
 
-def generate_exif_data(activity: dict, config: Config):    
+def generate_exif_data(activity: dict, timezone: ZoneInfo):    
     created_date_str = activity["created_at"]        
-    created_date = datetime.strptime(created_date_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=config.timezone)    
-    formatted_created_date = created_date.astimezone(tz=config.timezone).strftime('%Y:%m:%d %H:%M:%S')    
+    created_date = datetime.strptime(created_date_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone)    
+    formatted_created_date = created_date.astimezone(tz=timezone).strftime('%Y:%m:%d %H:%M:%S')    
     actor: dict = activity["actor"]
     teacher_name: str = ""
     if actor:
@@ -268,28 +275,28 @@ def main():
      # Check if the ./pics/ directory exists, create it if it doesn't
     if not os.path.exists('./pics/'):
         os.makedirs('./pics/')
-        
+
     config = config_parser()
 
     session = signme_in(browser, config=config)
 
-    if not config.guardian_id:
-        config.guardian_id=get_guardian_id(session)
+    if not config.guardianid:
+        config.guardianid=get_guardian_id(session)
 
-    if not config.child_ids:
-        config.child_ids = get_child_ids(session)
+    if not config.childids:
+        config.childids = get_child_ids(session)
 
-    start_date_tz = config.start_date.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-    end_date_tz = config.end_date.strftime("%Y-%m-%dT%H:%M:%S.%fZ")    
+    start_date_tz = config.startdate.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    end_date_tz = config.enddate.strftime("%Y-%m-%dT%H:%M:%S.%fZ")    
     # Begin fetching and saving images for each child
-    for child in config.child_ids:
-        page = config.start_page
+    for child in config.childids:
+        page = config.startpage
         while True:
             activities = get_activities(
                 session=session, 
                 id=child.id, 
                 page=page, 
-                page_size=config.page_size, 
+                page_size=config.pagesize, 
                 start=start_date_tz, 
                 end=end_date_tz
             )
