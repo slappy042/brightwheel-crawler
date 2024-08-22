@@ -39,14 +39,37 @@ console_handler.setLevel(logging.INFO)
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
+class Config:
+    username:  str
+    password: str
+    signin_url:str
+    kidlist_url:str
+    startdate:str
+    enddate:str
+    start_page:int
+    page_size:int
 
-def config_parser():
+def config_parser() -> Config:
     """parse config file in config.yml if present"""
+
     try:
-        with open("config.yml", "r") as config:
-            config = yaml.safe_load(config)
+        with open("config.yml", "r") as bw_config:
+            bw_config = yaml.safe_load(bw_config)
+            config = Config()
+            config.username = bw_config["bwuser"]
+            config.password = bw_config["bwpass"]
+            config.signin_url = bw_config["bwsignin"]
+            config.kidlist_url = bw_config["bwlist"]
+            config.startdate = bw_config["startdate"]
+            config.enddate = bw_config["enddate"]
+            config.start_page = bw_config["startpage"]
+            config.page_size = bw_config["pagesize"]
     except FileNotFoundError:
         logger.error("[!] No config file found, check config file!")
+        raise SystemExit
+    
+    except KeyError:
+        logger.error("[!] - Check config file, missing required values")
         raise SystemExit
 
     return config
