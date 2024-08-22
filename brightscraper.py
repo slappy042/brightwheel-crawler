@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import time
+from typing import Optional
 import yaml
 import argparse
 import random
@@ -12,10 +13,13 @@ import undetected_chromedriver as uc
 
 from selenium.common.exceptions import ElementNotVisibleException
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select, WebDriverWait
+
+from webdriver_manager.chrome import ChromeDriverManager
 
 """I was saving pictures ad hoc through the brightwheel app, but got way behind
 and didn't want to lose them if my kid changed schools or lost access to the app.
@@ -243,10 +247,23 @@ def get_images(browser, matches):
             logger.error("[!] - Failed to save {}".format(match))
 
 
-def use_chrome_selenium():
-    """Init logging and do it"""
+def use_chrome_selenium(version: Optional[int] = 127) -> uc.Chrome:
+    """Use undetected chrome driver
 
-    browser = uc.Chrome()
+    Args:
+        version (Optional[int], optional): Specify Chrome driver version if you are having issues. Defaults to 127.
+
+    Returns:
+        uc.Chrome: Controls the ChromeDriver and allows you to drive the browser.
+
+    Notes:
+        I had issues with the version, resolved using this post: https://stackoverflow.com/questions/29858752/error-message-chromedriver-executable-needs-to-be-available-in-the-path/52878725#52878725
+    """
+
+    browser = uc.Chrome(
+        service=ChromeService(ChromeDriverManager().install()), 
+        version_main=version
+        )
     return browser
 
 
@@ -256,7 +273,10 @@ def use_existing_chrome_session():
     try:
         chrome_options = webdriver.ChromeOptions()
         chrome_options.debugger_address = "127.0.0.1:9222"
-        browser = webdriver.Chrome(options=chrome_options)
+        browser = webdriver.Chrome(
+            options=chrome_options, 
+            service=ChromeService(ChromeDriverManager().install())
+        )
         return browser
     except Exception as e:
         logger.error(f"An error occurred: {e} - Please ensure Chrome is listening on port 9222")
