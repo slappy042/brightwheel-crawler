@@ -1,8 +1,10 @@
+from datetime import datetime
 import logging
 import os
 import re
 import time
 from typing import Optional
+from zoneinfo import ZoneInfo
 import yaml
 import argparse
 import random
@@ -27,6 +29,7 @@ This uses selenium to crawl a BrightWheel (https://mybrightwheel.com/) profile
 for images, find all of them, pass the cookies to requests, and then download
 all images in bulk. Works with current site design as off 6/24/19"""
 
+UTC = ZoneInfo("UTC")
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -43,31 +46,54 @@ console_handler.setLevel(logging.INFO)
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
-class Config:
+class Config(yaml.YAMLObject):
+    yaml_tag = u'!Config'
+    yaml_loader=yaml.SafeLoader
     username:  str
     password: str
-    signin_url:str
-    kidlist_url:str
-    startdate:str
-    enddate:str
-    start_page:int
-    page_size:int
+    guardian_id: str | None
+    child_ids: list[str] | None
+    signin_url: str
+    kidlist_url: str
+    start_date: datetime
+    end_date: datetime
+    start_page:int | None
+    page_size:int | None
+    timezone: str | None
+
+    def __init__(
+            self, 
+            bwuser, 
+            bwpass, 
+            guardianid, 
+            childids, 
+            bwsignin, 
+            bwlist, 
+            startdate, 
+            enddate, 
+            startpage = 0, 
+            pagesize = 10, 
+            timezone = "UTC",
+    ) -> None:
+        self.username = bwuser
+        self.password = bwpass
+        self.guardian_id = guardianid
+        self.child_ids = childids
+        self.signin_url = bwsignin
+        self.kidlist_url = bwlist
+        self.start_date = datetime.strptime(startdate, "%m/%d/%Y")
+        self.end_date = datetime.strptime(enddate, "%m/%d/%Y")
+        self.start_page = startpage
+        self.page_size = pagesize
+        self.timezone = timezone
 
 def config_parser() -> Config:
     """parse config file in config.yml if present"""
 
     try:
         with open("config.yml", "r") as bw_config:
-            bw_config = yaml.safe_load(bw_config)
-            config = Config()
-            config.username = bw_config["bwuser"]
-            config.password = bw_config["bwpass"]
-            config.signin_url = bw_config["bwsignin"]
-            config.kidlist_url = bw_config["bwlist"]
-            config.startdate = bw_config["startdate"]
-            config.enddate = bw_config["enddate"]
-            config.start_page = bw_config["startpage"]
-            config.page_size = bw_config["pagesize"]
+            return yaml.safe_load(bw_config)
+            
     except FileNotFoundError:
         logger.error("[!] No config file found, check config file!")
         raise SystemExit
@@ -301,18 +327,8 @@ def main():
         logger.error("[!] - No browser selected, exiting")
 
     config = config_parser()
-    try:
-        username = config["bwuser"]
-        password = config["bwpass"]
-        signin_url = config["bwsignin"]
-        kidlist_url = config["bwlist"]
-        startdate = config["startdate"]
-        enddate = config["enddate"]
-    except KeyError:
-        logger.error("[!] - Check config file, missing required values")
-        raise SystemExit
 
-    session = signme_in(browser, username, password, signin_url)
+    session = signme_in(browser, config=config)
 
     session, matches = pic_finder(session, kidlist_url, startdate, enddate, args)
 
