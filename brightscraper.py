@@ -28,12 +28,6 @@ from PIL import Image
 
 import piexif
 
-"""I was saving pictures ad hoc through the brightwheel app, but got way behind
-and didn't want to lose them if my kid changed schools or lost access to the app.
-This uses selenium to crawl a BrightWheel (https://mybrightwheel.com/) profile
-for images, find all of them, pass the cookies to requests, and then download
-all images in bulk. Works with current site design as off 6/24/19"""
-
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 
@@ -86,7 +80,14 @@ class Config(yaml.YAMLObject):
             self.__class__.__name__, self.bwuser, self.bwsignin, self.startdate, self.timezone)
 
 def config_parser() -> Config:
-    """parse config file in config.yml if present"""
+    """parse config file in config.yml if present
+
+    Raises:
+        SystemExit: If file not found or requirements aren't found
+
+    Returns:
+        Config: Config class from YAML object
+    """
 
     try:
         with open("config.yml", "r") as bw_config:
@@ -97,22 +98,33 @@ def config_parser() -> Config:
         logger.error("[!] No config file found, check config file!")
         raise SystemExit
     
-    except KeyError:
-        logger.error("[!] - Check config file, missing required values")
-        raise SystemExit
-    
     return config
 
 
-def get_random_time():
-    """Randomly wait before sending imput, some time under 4 seconds"""
+def get_random_time() -> int:
+    """Randomly wait before sending imput, some time under 4 seconds
+
+    Returns:
+        int: time in milliseconds
+    """
     random_wait = random.randint(0, 2000)
     return random_wait / 1000
 
 
 # Get the first URL and populate the fields
-def signme_in(browser, config: Config):
-    """Populate and send login info using U/P from config"""
+def signme_in(browser: webdriver.Chrome, config: Config)-> webdriver.Chrome:
+    """Populate and send login info using U/P from config
+
+    Args:
+        browser (webdriver.Chrome): Current session
+        config (Config): Config object from YAML file
+
+    Raises:
+        SystemExit: Exits if unable to authenticate
+
+    Returns:
+        webdriver.Chrome: Authenticated browser
+    """
     sign_in_url = f"{config.bwurl}/sign-in"
     browser.get(sign_in_url)
     time.sleep(get_random_time())
@@ -136,7 +148,20 @@ def signme_in(browser, config: Config):
     time.sleep(get_random_time() * 4)  # Change this to the amount of time you need to solve the captcha manually
     return browser
 
-def get_json_from_session(session: webdriver.Chrome, url: str) -> dict:    
+def get_json_from_session(session: webdriver.Chrome, url: str) -> dict:
+    """For API urls, return the JSON included in the 'pre' tag name
+
+    Args:
+        session (webdriver.Chrome): Current browser
+        url (str): API url
+
+    Raises:
+        SystemExit: If page or element can't be found
+
+    Returns:
+        dict: API response
+    """
+
     try:
         session.get(url=url)
         json_container = session.find_element(By.TAG_NAME, 'pre')
@@ -151,14 +176,38 @@ def get_json_from_session(session: webdriver.Chrome, url: str) -> dict:
         raise SystemExit
     return parsed_json
 
-def get_guardian_id(me:dict):    
+def get_guardian_id(me:dict)-> str:    
+    """Get the parent ID
+
+    Args:
+        me (dict): JSON reponse from me API
+
+    Raises:
+        SystemExit: Exit if not found
+
+    Returns:
+        str: parent ID
+    """
     guardian_id: str = me.get("object_id", None)
     if not guardian_id:
         logger.error("[!] - could not extract guardian id")
         raise SystemExit
     return guardian_id
 
-def get_child_ids(students: dict, index: Optional[int] = None):        
+def get_child_ids(students: dict, index: Optional[int] = None) -> list[Student]:
+    """Get the list of child UUID's from JSON response
+
+    Args:
+        students (dict): JSON response from students url
+        index (Optional[int], optional): Index of child you want to get photos for. Defaults to all.
+
+    Raises:
+        SystemExit: Exit if student ID object not found
+
+    Returns:
+        list[Student]: list of Student objects
+    """
+
     students_list: list[str] = students.get("students", [])
     if not students_list:
         logger.error("[!] - could not extract student ids")
@@ -168,14 +217,33 @@ def get_child_ids(students: dict, index: Optional[int] = None):
 
     return [Student(id = student["student"]["object_id"], name = student["student"]["first_name"]) for student in students_list]
 
-def get_activities(query: dict):
+def get_activities(query: dict) -> list[dict]:
+    """Get activities list from JSON response
+
+    Args:
+        query (dict): The API JSON response from Feed query
+
+    Returns:
+        list[dict]: List of activity objects
+    """
+
     activity_list: list[dict] = query.get("activities", None)
     if not activity_list:
         logger.info("[!] -no activities found")
         return []
     return activity_list
 
-def generate_exif_data(activity: dict, timezone: ZoneInfo):    
+def generate_exif_data(activity: dict, timezone: ZoneInfo) -> bytes:
+    """Generate exif data from activity, including note, teacher, and dates
+
+    Args:
+        activity (dict): Activity object
+        timezone (ZoneInfo): Timezone to use for created date
+
+    Returns:
+        bytes: exif data
+    """
+
     created_date_str = activity["created_at"]        
     created_date = datetime.strptime(created_date_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone)    
     formatted_created_date = created_date.astimezone(tz=timezone).strftime('%Y:%m:%d %H:%M:%S')    
