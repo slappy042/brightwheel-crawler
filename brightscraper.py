@@ -3,7 +3,6 @@ from datetime import datetime
 import json
 import logging
 import os
-import re
 import time
 from typing import Optional
 from urllib.request import urlopen
@@ -129,11 +128,11 @@ def signme_in(browser, config: Config):
     # Submit login, have to wait for page to change
     try:
         loginpass.submit()
-        WebDriverWait(browser, 45).until(EC.url_changes(sign_in_url))
+        WebDriverWait(browser, 120).until(EC.url_changes(sign_in_url))
     except:
         logger.error("[!] - Unable to authenticate - Check credentials")
         raise SystemExit
-    time.sleep(get_random_time() * 3)  # Change this to the amount of time you need to solve the captcha manually
+    time.sleep(get_random_time() * 4)  # Change this to the amount of time you need to solve the captcha manually
     return browser
 
 def get_json_from_session(session: webdriver.Chrome, url: str) -> dict:    
@@ -142,7 +141,10 @@ def get_json_from_session(session: webdriver.Chrome, url: str) -> dict:
         json_container = session.find_element(By.TAG_NAME, 'pre')
         parsed_json = json.loads(json_container.text)
     except NoSuchElementException:
-        logger.error("[!] - 'pre' element not found in response")
+        logger.error(f"[!] - 'pre' element not found in {url} response")
+        raise SystemExit
+    except Exception as e:
+        logger.error(f"[!] - Unable to find {url}: {e}")
         raise SystemExit
     return parsed_json
 
@@ -166,8 +168,8 @@ def get_child_ids(students: dict, index: Optional[int] = None):
 def get_activities(query: dict):
     activity_list: list[dict] = query.get("activities", None)
     if not activity_list:
-        logger.error("[!] - could not extract activities")
-        raise SystemExit
+        logger.info("[!] -no activities found")
+        return []
     return activity_list
 
 def generate_exif_data(activity: dict, timezone: ZoneInfo):    
@@ -267,10 +269,10 @@ def main():
         config.childids = get_child_ids(students=students, index=args.student_number)
 
     start_date = datetime.strptime(config.startdate, "%m/%d/%Y")
-    start_date_tz = start_date.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    query_start_date = start_date.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
     end_date = datetime.strptime(config.enddate, "%m/%d/%Y")
-    end_date_tz = end_date.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    query_end_date = end_date.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     
     tz = ZoneInfo(config.timezone)
 
@@ -278,10 +280,15 @@ def main():
     for child in config.childids:
         page = config.startpage
         while True:
-            activities_url = f"{config.bwurl}/api/v1/students/{child.id}/activities?page={page}&page_size={config.pagesize}&start_date={start_date_tz}&end_date={end_date_tz}&action_type=ac_photo&include_parent_actions=true"
+            activities_url = f"{config.bwurl}/api/v1/students/{child.id}/activities?page={page}&page_size={config.pagesize}&start_date={query_start_date}&end_date={query_end_date}&action_type=ac_photo&include_parent_actions=true"
             query = get_json_from_session(session=session, url=activities_url)
             logger.info('activities %s', query)
-            activities = get_activities(activities=query)
+            activities = get_activities(query=query)
+            
+            if len(activities) == 0:
+                logger.info(F"[-] - No activities found on page {page}") 
+                break
+
             for activity in activities:
 
                 event_date_str = activity["event_date"]                
@@ -293,9 +300,16 @@ def main():
                 exif = generate_exif_data(activity, timezone=tz)           
 
                 filename = f"{child.name}_{formatted_event_date}_{media['object_id']}.jpg"
-
-                with Image.open(urlopen(media["image_url"])) as img:
-                    img.save("./pics/" + filename, exif=exif)
-
+                image_url = media["image_url"]
+                logger.info(F"[-] - Downloading {image_url}")
+                try:
+                    with Image.open(urlopen(image_url)) as img:                        
+                        img.save("./pics/" + filename, exif=exif)
+                        logger.info(F"[-] - Image saved as {filename}")                        
+                except:
+                    logger.error(f"[!] - Failed to save {filename}")
+                        
+            page = page + 1
+    logger.info(F"[-] - Done") 
 if __name__ == "__main__":
     main()
