@@ -35,8 +35,6 @@ This uses selenium to crawl a BrightWheel (https://mybrightwheel.com/) profile
 for images, find all of them, pass the cookies to requests, and then download
 all images in bulk. Works with current site design as off 6/24/19"""
 
-BASE_BRIGHTWHEEL_URL = "https://schools.mybrightwheel.com"
-
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 
@@ -63,10 +61,9 @@ class Config(yaml.YAMLObject):
     bwpass: str
     guardianid: str | None
     childids: list[Student] | None
-    bwsignin: str
-    bwlist: str
-    startdate: datetime
-    end_date: datetime
+    bwurl: str
+    startdate: str
+    end_date: str
     startpage:int | None
     pagesize:int | None
     timezone: ZoneInfo | None
@@ -77,8 +74,7 @@ class Config(yaml.YAMLObject):
             bwpass, 
             guardianid, 
             childids, 
-            bwsignin, 
-            bwlist, 
+            bwurl,
             startdate, 
             enddate, 
             startpage = 0, 
@@ -89,13 +85,12 @@ class Config(yaml.YAMLObject):
         self.password = bwpass
         self.guardianid = guardianid
         self.childids = childids
-        self.bwsignin = bwsignin
-        self.bwlist = bwlist
-        self.startdate = datetime.strptime(startdate, "%m/%d/%Y")
-        self.enddate = datetime.strptime(enddate, "%m/%d/%Y")
+        self.bwurl = bwurl
+        self.startdate = startdate
+        self.enddate = enddate
         self.startpage = startpage
         self.page_size = pagesize
-        self.timezone = ZoneInfo(timezone)
+        self.timezone = timezone
     
     def __repr__(self):
         return "%s(username=%r, signin_url=%r, start_date=%r, timezone=%r)" % (
@@ -129,8 +124,8 @@ def get_random_time():
 # Get the first URL and populate the fields
 def signme_in(browser, config: Config):
     """Populate and send login info using U/P from config"""
-
-    browser.get(config.bwsignin)
+    sign_in_url = f"{config.bwurl}/sign-in"
+    browser.get(sign_in_url)
     time.sleep(get_random_time())
     loginuser = browser.find_element(By.XPATH, '//input[@id="username"]')
     loginpass = browser.find_element(By.ID, "password")
@@ -144,7 +139,7 @@ def signme_in(browser, config: Config):
     # Submit login, have to wait for page to change
     try:
         loginpass.submit()
-        WebDriverWait(browser, 45).until(EC.url_changes(config.bwsignin))
+        WebDriverWait(browser, 45).until(EC.url_changes(sign_in_url))
     except:
         logger.error("[!] - Unable to authenticate - Check credentials")
         raise SystemExit
@@ -160,9 +155,8 @@ def get_json_from_session(session: webdriver.Chrome) -> dict:
         raise SystemExit
     return parsed_json
 
-def get_guardian_id(session: webdriver.Chrome, url: str = "/api/v1/users/me"):
-    me_url = f"{BASE_BRIGHTWHEEL_URL}{url}"
-    session.get(me_url)
+def get_guardian_id(session: webdriver.Chrome, url: str):
+    session.get(url=url)
     me = get_json_from_session(session=session)
     logger.info('me %s', me)
     guardian_id: str = me.get("object_id", None)
@@ -171,9 +165,13 @@ def get_guardian_id(session: webdriver.Chrome, url: str = "/api/v1/users/me"):
         raise SystemExit
     return guardian_id
 
-def get_child_ids(session: webdriver.Chrome, id: str, index: Optional[int]):
-    students_url = f"{BASE_BRIGHTWHEEL_URL}/api/v1/guardians/{id}/students?include[]=schools"
-    session.get(students_url)
+def get_child_ids(
+        session: webdriver.Chrome, 
+        url: str, 
+        index: Optional[int] = None
+    ):
+    
+    session.get(url=url)
     students = get_json_from_session(session=session)
     logger.info('children %s', students)
     students_list: list[str] = students.get("students", [])
@@ -185,7 +183,14 @@ def get_child_ids(session: webdriver.Chrome, id: str, index: Optional[int]):
 
     return [Student(id = student["student"]["object_id"], name = student["student"]["first_name"]) for student in students_list]
 
-def get_activities(session: webdriver.Chrome, id: str, page: int, page_size: int, start: str, end: str,):
+def get_activities(
+        session: webdriver.Chrome, 
+        id: str, 
+        page: int, 
+        page_size: int, 
+        start: str, 
+        end: str,
+    ):
     activities_url = f"{BASE_BRIGHTWHEEL_URL}/api/v1/students/{id}/activities?page={page}&page_size={page_size}&start_date={start}&end_date={end}&action_type=ac_photo&include_parent_actions=true"
     session.get(activities_url)
     activities = get_json_from_session(session=session)
@@ -281,13 +286,21 @@ def main():
     session = signme_in(browser, config=config)
 
     if not config.guardianid:
-        config.guardianid=get_guardian_id(session)
+        me_url = f"{config.bwurl}/api/v1/users/me"
+        config.guardianid=get_guardian_id(session=session, url=me_url)
 
     if not config.childids:
-        config.childids = get_child_ids(session)
+        students_url = f"{config.bwurl}/api/v1/guardians/{config.guardianid}/students?include[]=schools"
+        config.childids = get_child_ids(session, url=students_url)
 
-    start_date_tz = config.startdate.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-    end_date_tz = config.enddate.strftime("%Y-%m-%dT%H:%M:%S.%fZ")    
+    start_date = datetime.strptime(config.startdate, "%m/%d/%Y")
+    start_date_tz = start_date.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+    end_date = datetime.strptime(config.enddate, "%m/%d/%Y")
+    end_date_tz = end_date.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    
+    tz = ZoneInfo(config.timezone)
+
     # Begin fetching and saving images for each child
     for child in config.childids:
         page = config.startpage
@@ -303,12 +316,12 @@ def main():
             for activity in activities:
 
                 event_date_str = activity["event_date"]                
-                event_date = datetime.strptime(event_date_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=config.timezone)    
-                formatted_event_date = event_date.astimezone(tz=config.timezone).strftime("%Y%m%d")
+                event_date = datetime.strptime(event_date_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=tz)    
+                formatted_event_date = event_date.astimezone(tz=tz).strftime("%Y%m%d")
                 
                 media = activity["media"]
 
-                exif = generate_exif_data(activity, config=config)           
+                exif = generate_exif_data(activity, timezone=tz)           
 
                 filename = f"{child.name}_{formatted_event_date}_{media['object_id']}.jpg"
 

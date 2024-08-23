@@ -3,8 +3,7 @@ bwuser: 'email address'
 bwpass: 'password'
 guardianid: null
 childids: []
-bwsignin: 'https://schools.mybrightwheel.com/sign-in'
-bwlist: 'https://schools.mybrightwheel.com/children/list'
+bwurl: 'https://schools.mybrightwheel.com'
 startdate: '01/01/2018'
 enddate: '07/07/2019'
 startpage: 0
