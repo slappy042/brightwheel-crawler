@@ -57,17 +57,7 @@ class Student:
 class Config(yaml.YAMLObject):
     yaml_tag = u'!Config'
     yaml_loader=yaml.SafeLoader
-    bwuser:  str
-    bwpass: str
-    guardianid: str | None
-    childids: list[Student] | None
-    bwurl: str
-    startdate: str
-    end_date: str
-    startpage:int | None
-    pagesize:int | None
-    timezone: ZoneInfo | None
-
+    
     def __init__(
             self, 
             bwuser, 
@@ -81,16 +71,16 @@ class Config(yaml.YAMLObject):
             pagesize = 10, 
             timezone = "UTC",
     ) -> None:
-        self.bwuser = bwuser
-        self.password = bwpass
-        self.guardianid = guardianid
-        self.childids = childids
-        self.bwurl = bwurl
-        self.startdate = startdate
-        self.enddate = enddate
-        self.startpage = startpage
-        self.page_size = pagesize
-        self.timezone = timezone
+        self.bwuser: str = bwuser
+        self.bwpass: str = bwpass
+        self.guardianid: str | None = guardianid
+        self.childids: list[Student] | None = childids
+        self.bwurl: str = bwurl
+        self.startdate: str = startdate
+        self.enddate: str = enddate
+        self.startpage: int = startpage
+        self.pagesize: int = pagesize
+        self.timezone: str = timezone
     
     def __repr__(self):
         return "%s(username=%r, signin_url=%r, start_date=%r, timezone=%r)" % (
@@ -146,8 +136,9 @@ def signme_in(browser, config: Config):
     time.sleep(get_random_time() * 3)  # Change this to the amount of time you need to solve the captcha manually
     return browser
 
-def get_json_from_session(session: webdriver.Chrome) -> dict:    
+def get_json_from_session(session: webdriver.Chrome, url: str) -> dict:    
     try:
+        session.get(url=url)
         json_container = session.find_element(By.TAG_NAME, 'pre')
         parsed_json = json.loads(json_container.text)
     except NoSuchElementException:
@@ -155,25 +146,14 @@ def get_json_from_session(session: webdriver.Chrome) -> dict:
         raise SystemExit
     return parsed_json
 
-def get_guardian_id(session: webdriver.Chrome, url: str):
-    session.get(url=url)
-    me = get_json_from_session(session=session)
-    logger.info('me %s', me)
+def get_guardian_id(me:dict):    
     guardian_id: str = me.get("object_id", None)
     if not guardian_id:
         logger.error("[!] - could not extract guardian id")
         raise SystemExit
     return guardian_id
 
-def get_child_ids(
-        session: webdriver.Chrome, 
-        url: str, 
-        index: Optional[int] = None
-    ):
-    
-    session.get(url=url)
-    students = get_json_from_session(session=session)
-    logger.info('children %s', students)
+def get_child_ids(students: dict, index: Optional[int] = None):        
     students_list: list[str] = students.get("students", [])
     if not students_list:
         logger.error("[!] - could not extract student ids")
@@ -183,19 +163,8 @@ def get_child_ids(
 
     return [Student(id = student["student"]["object_id"], name = student["student"]["first_name"]) for student in students_list]
 
-def get_activities(
-        session: webdriver.Chrome, 
-        id: str, 
-        page: int, 
-        page_size: int, 
-        start: str, 
-        end: str,
-    ):
-    activities_url = f"{BASE_BRIGHTWHEEL_URL}/api/v1/students/{id}/activities?page={page}&page_size={page_size}&start_date={start}&end_date={end}&action_type=ac_photo&include_parent_actions=true"
-    session.get(activities_url)
-    activities = get_json_from_session(session=session)
-    logger.info('activities %s', activities)
-    activity_list: list[dict] = activities.get("activities", None)
+def get_activities(query: dict):
+    activity_list: list[dict] = query.get("activities", None)
     if not activity_list:
         logger.error("[!] - could not extract activities")
         raise SystemExit
@@ -287,11 +256,15 @@ def main():
 
     if not config.guardianid:
         me_url = f"{config.bwurl}/api/v1/users/me"
-        config.guardianid=get_guardian_id(session=session, url=me_url)
+        me = get_json_from_session(session=session, url=me_url)
+        logger.info('me %s', me)
+        config.guardianid=get_guardian_id(me=me)
 
     if not config.childids:
         students_url = f"{config.bwurl}/api/v1/guardians/{config.guardianid}/students?include[]=schools"
-        config.childids = get_child_ids(session, url=students_url)
+        students = get_json_from_session(session=session, url=students_url)
+        logger.info('children %s', students)
+        config.childids = get_child_ids(students=students, index=args.student_number)
 
     start_date = datetime.strptime(config.startdate, "%m/%d/%Y")
     start_date_tz = start_date.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -305,14 +278,10 @@ def main():
     for child in config.childids:
         page = config.startpage
         while True:
-            activities = get_activities(
-                session=session, 
-                id=child.id, 
-                page=page, 
-                page_size=config.pagesize, 
-                start=start_date_tz, 
-                end=end_date_tz
-            )
+            activities_url = f"{config.bwurl}/api/v1/students/{child.id}/activities?page={page}&page_size={config.pagesize}&start_date={start_date_tz}&end_date={end_date_tz}&action_type=ac_photo&include_parent_actions=true"
+            query = get_json_from_session(session=session, url=activities_url)
+            logger.info('activities %s', query)
+            activities = get_activities(activities=query)
             for activity in activities:
 
                 event_date_str = activity["event_date"]                
