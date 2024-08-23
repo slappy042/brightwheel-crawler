@@ -131,6 +131,7 @@ def signme_in(browser, config: Config):
         WebDriverWait(browser, 120).until(EC.url_changes(sign_in_url))
     except:
         logger.error("[!] - Unable to authenticate - Check credentials")
+        browser.quit()
         raise SystemExit
     time.sleep(get_random_time() * 4)  # Change this to the amount of time you need to solve the captcha manually
     return browser
@@ -142,9 +143,11 @@ def get_json_from_session(session: webdriver.Chrome, url: str) -> dict:
         parsed_json = json.loads(json_container.text)
     except NoSuchElementException:
         logger.error(f"[!] - 'pre' element not found in {url} response")
+        session.quit()
         raise SystemExit
     except Exception as e:
         logger.error(f"[!] - Unable to find {url}: {e}")
+        session.quit()
         raise SystemExit
     return parsed_json
 
@@ -311,5 +314,6 @@ def main():
                         
             page = page + 1
     logger.info(F"[-] - Done") 
+    session.quit()
 if __name__ == "__main__":
     main()

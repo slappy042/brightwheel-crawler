@@ -8,6 +8,9 @@ requests = "*"
 selenium = "==4.11.2"
 pyyaml = "*"
 undetected-chromedriver = ">3.5.4"
+webdriver-manager = "*"
+pillow = "*"
+piexif = "*"
 
 [dev-packages]
 black = "*"
