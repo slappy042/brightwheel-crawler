@@ -1,10 +1,12 @@
 import logging
+import os
 import re
 import time
 import yaml
 import argparse
 import random
 import datetime
+import sys
 
 import requests
 import undetected_chromedriver as uc
@@ -141,14 +143,13 @@ def pic_finder(browser, kidlist_url, startdate, enddate, args):
 
     # This is the XPATH for the Apply button.
     browser.find_element(By.XPATH, '//*[@id="main"]/div/div/div[2]/div/form/button').click()
-
+    logger.info("[-] - Applied date range")
     try:
         last_height = browser.execute_script("return document.body.scrollHeight")
         counter = 0
         state = True
         while state is True:
             try:
-                counter += 1
                 button = WebDriverWait(browser, 7).until(EC.presence_of_element_located((By.XPATH, '//button[text()="Load more"]')))
                 button.click()
             except:
@@ -157,6 +158,7 @@ def pic_finder(browser, kidlist_url, startdate, enddate, args):
                 else:
                     logger.error("[!] No loading button found")
             browser.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            counter += 1
 
             # Wait to load the page.
             time.sleep(2)
@@ -178,6 +180,14 @@ def pic_finder(browser, kidlist_url, startdate, enddate, args):
         browser.page_source,
     )
 
+    # matches = re.findall(r'<img\s+src="([^"]+)"', browser.page_source,)
+
+    count_matches = len(matches)
+    if count_matches == 0:
+        logger.error("[!] No Images found to download! Check the source target page")
+    else:
+        logger.info("[!] Found {} files to download...".format(count_matches))
+
     return browser, matches, student_name
 
 
@@ -193,13 +203,33 @@ def pic_finder_already_loaded(browser, kidlist_url, startdate, enddate, args):
 
 
 def get_images(browser, matches, student_name):
-    """Since Selenium doesn't handle saving images well, requests
+    """Brightwheel moved their image storage to a CDN with signed urls, so we dont need to use
+    cookies anymore. I'm eaving this code in case that behavior ever comes back
+    
+    Since Selenium doesn't handle saving images well, requests
     can do this for us, but we need to pass it the cookies"""
-    cookies = browser.get_cookies()
+    # Check if the ./pics/ directory exists, create it if it doesn't
+    if not os.path.exists('./pics/'):
+        os.makedirs('./pics/')
 
-    session = requests.Session()
-    for cookie in cookies:
-        session.cookies.set(cookie["name"], cookie["value"])
+    # cookies = browser.get_cookies()
+    # session = requests.Session()
+    # for cookie in cookies:
+    #     session.cookies.set(cookie["name"], cookie["value"])
+    # for match in matches:
+    #     try:
+    #         filename = match.split("/")[-1].split("?")[0].split("%2F")[-1]
+    #         request = session.get(match)
+    #         open("./pics/" + filename, "wb").write(request.content)
+    #         logger.info("[-] - Downloading {}".format(filename))
+    #     except:
+    #         logger.error("[!] - Failed to save {}".format(match))
+    # try:
+    #     session.cookies.clear()
+    #     browser.delete_all_cookies()
+    #     logger.info("[-] - Cleared cookies")
+    # except:
+    #     logger.error("[!] - Failed to clear cookies")
 
     for match in matches:
         # all EXIF data has been removed from files
@@ -211,18 +241,12 @@ def get_images(browser, matches, student_name):
         # filename = f"{match.group('filename')}_{match.group('timestamp')}.{match.group('extension')}"
         url = match.group('url')
         try:
-            request = session.get(url)
+            request = requests.get(url)
+            # request = session.get(url)
             open("./pics/" + filename, "wb").write(request.content)
-            logger.info(f"[-] - Downloading {filename}")
-        except Exception as e:
-            logger.error(f"[!] - Failed to save {filename} from {url}: {e}")
-
-    try:
-        session.cookies.clear()
-        browser.delete_all_cookies()
-        logger.info("[-] - Cleared cookies")
-    except:
-        logger.error("[!] - Failed to clear cookies")
+            logger.info("[-] - Downloading {}".format(filename))
+        except:
+            logger.error("[!] - Failed to save {}".format(match))
 
 
 def use_chrome_selenium():
@@ -235,18 +259,21 @@ def use_chrome_selenium():
 def use_existing_chrome_session():
     # Check if chrome is listening on port 9222
     # If not, start it
-
-    chrome_options = webdriver.ChromeOptions()
-    chrome_options.debugger_address = "127.0.0.1:9222"
-    browser = webdriver.Chrome(options=chrome_options)
-    return browser
+    try:
+        chrome_options = webdriver.ChromeOptions()
+        chrome_options.debugger_address = "127.0.0.1:9222"
+        browser = webdriver.Chrome(options=chrome_options)
+        return browser
+    except Exception as e:
+        logger.error(f"An error occurred: {e} - Please ensure Chrome is listening on port 9222")
+        sys.exit(1)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Brightwheel Scraper")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("-c", "--chrome-selenium", action="store_true", help="Use existing Chrome session to login to Brightwheel")
-    group.add_argument("-e", "--chrome-session", action="store_true", help="Use existing Chrome session to login to Brightwheel")
+    group.add_argument("-c", "--chrome_selenium", action="store_true", help="Use existing Chrome session to login to Brightwheel")
+    group.add_argument("-e", "--chrome_session", action="store_true", help="Use existing Chrome session to login to Brightwheel")
     parser.add_argument(
         "-n", "--student-number", type=int, help="Select a student by number, indexed starting at 1. Look at the student list and count in order"
     )
