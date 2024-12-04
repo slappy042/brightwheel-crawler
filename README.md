@@ -49,7 +49,8 @@ This is a script to get the exifdata from the image and rename the file to be pr
 
 `https://photo.stackexchange.com/a/126978`
 
-```
+#### Dec 2023
+```bash
 cd pics
 # reads UTC timestamp from filename, puts into standard date tags
 exiftool -overwrite_original "-alldates<filename" .
@@ -61,3 +62,36 @@ exiftool -overwrite_original "-GPSDateStamp<DateTimeOriginal" .
 # timeshift standard date tags to PST
 exiftool -overwrite_original "-alldates-=8" .
 ```
+
+#### Dec 2024
+timestamp is in FileModifyDate
+
+```bash
+# original from docs
+exiftool "-FileName<CreateDate" -d "%Y%m%d_%H%M%S.%%e" DIR
+
+# run this
+cp -rp pics pics_test
+exiftool "-FileName<FileModifyDate" -d "Ryan_Hardy_%Y%m%d_%H%M%S%%+c.%%e" -globalTimeShift -7 pics_test
+
+```
+
+#### notes for Dec 2024
+I ran it in 3 batches then consolidated everything under pics_thru_20241202
+
+
+# Jeff: overall use
+
+in a terminal:
+```bash
+google-chrome --remote-debugging-port=9222
+```
+then login to brightwheel
+
+in VSCode terminal:
+```bash
+pipenv install
+pipenv shell
+python brightscraper.py -e
+```
+

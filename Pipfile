@@ -5,9 +5,9 @@ name = "pypi"
 
 [packages]
 requests = "*"
-selenium = "==4.11.2"
 pyyaml = "*"
-undetected-chromedriver = ">3.5.4"
+selenium = "*"
+undetected-chromedriver = "*"
 
 [dev-packages]
 black = "*"

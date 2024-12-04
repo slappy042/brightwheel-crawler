@@ -40,9 +40,6 @@ console_handler.setLevel(logging.INFO)
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
-
-IMAGES_REGEX = r'(?<=href=\")(?P<url>https:\/\/cdn\.mybrightwheel\.com\/media_images\/images\/([0-9a-zA-Z]+\/)*(?P<filename>[0-9a-zA-Z]+)\.(?P<extension>jpg|png))\?(?P<timestamp>\d+)(?="?)'
-
 def config_parser():
     """parse config file in config.yml if present"""
     try:
@@ -86,15 +83,12 @@ def signme_in(browser, username, password, signin_url):
     time.sleep(get_random_time() * 3)  # Change this to the amount of time you need to solve the captcha manually
     return browser
 
-
-def pic_finder(browser, kidlist_url, startdate, enddate, args):
-    """This is the core logic of the script, navigate through the site, find
-    the page with photos, scroll to the bottom to load them all, load them all
-    in a specified date range, and create an iterable list of image URLs"""
-
+def get_feed_url(browser, kidlist_url, args):
+    """This guides you to pick a student from the list and returns their feed URL
+    """
     browser.get(kidlist_url)
 
-    time.sleep(get_random_time())
+    time.sleep(2 + get_random_time())
 
     # This xpath is generic enough to find any student listed.
     # You need to iterate through a list you create if you have more than one
@@ -124,26 +118,60 @@ def pic_finder(browser, kidlist_url, startdate, enddate, args):
         raise SystemExit
 
     feed_url = profile_url.rsplit("/", 1)[0] + "/feed"
+    return feed_url, student_name
 
-    time.sleep(get_random_time())
 
-    # Get to feed, this is where the pictures are
-    # Open the feed_url
-    browser.get(feed_url)
-    time.sleep(3)
+def pic_finder(browser, kidlist_url, startdate, enddate, args):
+    """This is the core logic of the script, navigate through the site, find
+    the page with photos, scroll to the bottom to load them all, load them all
+    in a specified date range, and create an iterable list of image URLs"""
 
-    # Populate the selector for date range to load all images
+
+    if "/feed" not in browser.current_url:
+        logger.info("feed is not loaded. going to children list.")
+        feed_url, student_name = get_feed_url(browser, kidlist_url, args)
+
+        time.sleep(get_random_time())
+
+        # Get to feed, this is where the pictures are
+        # Open the feed_url
+        browser.get(feed_url)
+        time.sleep(3)
+    else:
+        # heading = browser.find_element(By.XPATH, '//*[@id="main"]/div/div/div/div[2]/header/div/h1')
+        # student_name = heading.text.replace(' "1"','')
+        student_name = browser.find_element(By.XPATH, '//div[@data-item="HEADING"]').text.replace(' "1"','')
+        logger.info(f"feed page already loaded, {student_name=}")
+
+    # Populate the selector for date range to load all images.
+    # strip the slashes from startdate and enddate when sending due to selenium/vnc/linux bug?
+    # the date input still works without slashes, ie 12012024 is 12/01/2024.
+    # also, clear the date fields first in case there's some text there already.
     start_date = browser.find_element(By.NAME, "start_date")
-    start_date.send_keys(startdate)
+    if start_date.get_property("value") != "":
+        start_date.send_keys(Keys.CONTROL, "a")
+        start_date.send_keys(Keys.DELETE)
+    logger.info(f"sending keys {startdate.replace('/','')}")
+    start_date.send_keys(startdate.replace('/',''))
     end_date = browser.find_element(By.NAME, "end_date")
-    end_date.send_keys(enddate)
+    if end_date.get_property("value") != "":
+        end_date.send_keys(Keys.CONTROL, "a")
+        end_date.send_keys(Keys.DELETE)
+    end_date.send_keys(enddate.replace('/',''))
     select = browser.find_element(By.ID, "select-input-2")
     select.send_keys("Photo")
     select.send_keys(Keys.ENTER)
 
+    start_val = start_date.get_property("value")
+    end_val = end_date.get_property("value")
+
+    if start_val != startdate or end_val != enddate:
+        logger.error(f"[ERR] cannot apply dates {start_val=} {startdate=} {end_val=} {enddate=}")
+        sys.exit(1)
+
     # This is the XPATH for the Apply button.
     browser.find_element(By.XPATH, '//*[@id="main"]/div/div/div[2]/div/form/button').click()
-    logger.info("[-] - Applied date range")
+    logger.info(f"[-] - Applied date range {startdate} to {enddate}")
     try:
         last_height = browser.execute_script("return document.body.scrollHeight")
         counter = 0
@@ -175,12 +203,7 @@ def pic_finder(browser, kidlist_url, startdate, enddate, args):
     except ElementNotVisibleException:
         logger.info("none")
 
-    matches = re.finditer(
-        IMAGES_REGEX,
-        browser.page_source,
-    )
-
-    # matches = re.findall(r'<img\s+src="([^"]+)"', browser.page_source,)
+    matches = re.findall(r'<img\s+src="([^"]+)"', browser.page_source,)
 
     count_matches = len(matches)
     if count_matches == 0:
@@ -195,10 +218,7 @@ def pic_finder_already_loaded(browser, kidlist_url, startdate, enddate, args):
     """This is a shortcut function used when the browser has already loaded the entire feed.
     """
     student_name = browser.find_element(By.XPATH, '//div[@data-item="HEADING"]').text.replace(' "1"','')
-    matches = re.finditer(
-        IMAGES_REGEX,
-        browser.page_source,
-    )
+    matches = re.findall(r'<img\s+src="([^"]+)"', browser.page_source,)
     return browser, matches, student_name
 
 
@@ -212,38 +232,16 @@ def get_images(browser, matches, student_name):
     if not os.path.exists('./pics/'):
         os.makedirs('./pics/')
 
-    # cookies = browser.get_cookies()
-    # session = requests.Session()
-    # for cookie in cookies:
-    #     session.cookies.set(cookie["name"], cookie["value"])
-    # for match in matches:
-    #     try:
-    #         filename = match.split("/")[-1].split("?")[0].split("%2F")[-1]
-    #         request = session.get(match)
-    #         open("./pics/" + filename, "wb").write(request.content)
-    #         logger.info("[-] - Downloading {}".format(filename))
-    #     except:
-    #         logger.error("[!] - Failed to save {}".format(match))
-    # try:
-    #     session.cookies.clear()
-    #     browser.delete_all_cookies()
-    #     logger.info("[-] - Cleared cookies")
-    # except:
-    #     logger.error("[!] - Failed to clear cookies")
-
     for match in matches:
-        # all EXIF data has been removed from files
-        # we want timestamp in filename for exiftool to parse as per https://exiftool.org/faq.html#Q5
-        # let's name the files like <student_name>_<timestamp>.jpg
-        timestamp_str = datetime.datetime.fromtimestamp(int(match.group('timestamp')), datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
-        student_name = student_name.replace(" ","_")
-        filename = f"{student_name}_{timestamp_str}_{match.group('filename')}.{match.group('extension')}"
-        # filename = f"{match.group('filename')}_{match.group('timestamp')}.{match.group('extension')}"
-        url = match.group('url')
         try:
-            request = requests.get(url)
-            # request = session.get(url)
-            open("./pics/" + filename, "wb").write(request.content)
+            filename = match.split("/")[-1].split("?")[0].split("%2F")[-1]
+            response = requests.get(match)
+            # ie, 'Mon, 03 Jun 2024 18:56:30 GMT'
+            lastmod = response.headers['Last-Modified']
+            lastmod_dt = datetime.datetime.strptime(lastmod, "%a, %d %b %Y %H:%M:%S %Z")
+            # logger.info(f"{lastmod=} {lastmod_dt=}")
+            open("./pics/" + filename, "wb").write(response.content)
+            os.utime("./pics/" + filename, (lastmod_dt.timestamp(),lastmod_dt.timestamp()))
             logger.info("[-] - Downloading {}".format(filename))
         except:
             logger.error("[!] - Failed to save {}".format(match))
@@ -305,13 +303,7 @@ def main():
     else:
         session = browser
 
-    if "/feed" in browser.current_url:
-        # use this when the full page is already loaded in your debug chrome browser (as from a failed run)
-        # THIS ASSUMES THE FULL FEED WAS LOADED IF YOU ARE ON THIS PAGE WHEN RUNNING THE SCRIPT
-        logger.info("looks like feed is already loaded")
-        session, matches, student_name = pic_finder_already_loaded(session, kidlist_url, startdate, enddate, args)
-    else:
-        session, matches, student_name = pic_finder(session, kidlist_url, startdate, enddate, args)
+    session, matches, student_name = pic_finder(session, kidlist_url, startdate, enddate, args)
 
 
     get_images(session, matches, student_name)
