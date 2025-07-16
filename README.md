@@ -86,7 +86,8 @@ in a terminal:
 ```bash
 google-chrome --remote-debugging-port=9222
 ```
-then login to brightwheel
+then [login](https://schools.mybrightwheel.com/sign-in) to brightwheel
+
 
 in VSCode terminal:
 ```bash
@@ -95,3 +96,18 @@ pipenv shell
 python brightscraper.py -e
 ```
 
+#### July 2025
+
+Chrome now requires `--user-data-dir` for remote-debugging-port to work.
+
+```bash
+google-chrome --remote-debugging-port=9222 --user-data-dir=/home/jeff/.config/google-chrome/Default
+```
+
+But now, the brightwheel app has changed how dates are entered so the Selenium code in pic_finder is broken.
+Check for any updated forks?
+This guy's fork is recent: https://github.com/remotephone/brightwheel-crawler/blob/adb9144cede5b5aa6681a2fb0c0f5a25b99911c9/brightscraper.py
+And it uses the Brightwheel API to get a JSON blob with all pic data so there's no Selenium-crawling the feed.
+Let's try it!
+
+ 
