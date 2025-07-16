@@ -11,6 +11,8 @@ import yaml
 import argparse
 import random
 import sys
+import subprocess
+import tempfile
 
 import undetected_chromedriver as uc
 
@@ -125,27 +127,30 @@ def signme_in(browser: webdriver.Chrome, config: Config)-> webdriver.Chrome:
     Returns:
         webdriver.Chrome: Authenticated browser
     """
-    sign_in_url = f"{config.bwurl}/sign-in"
-    browser.get(sign_in_url)
-    time.sleep(get_random_time())
-    loginuser = browser.find_element(By.XPATH, '//input[@id="username"]')
-    loginpass = browser.find_element(By.ID, "password")
-    loginuser.click()
-    time.sleep(get_random_time())
-    loginuser.send_keys(config.bwuser)
-    loginpass.click()
-    time.sleep(get_random_time())
-    loginpass.send_keys(config.bwpass)
 
-    # Submit login, have to wait for page to change
-    try:
-        loginpass.submit()
-        WebDriverWait(browser, 120).until(EC.url_changes(sign_in_url))
-    except:
-        logger.error("[!] - Unable to authenticate - Check credentials")
-        browser.quit()
-        raise SystemExit
-    time.sleep(get_random_time() * 4)  # Change this to the amount of time you need to solve the captcha manually
+    if "/signin" in browser.current_url:
+        sign_in_url = f"{config.bwurl}/sign-in"
+        browser.get(sign_in_url)
+        time.sleep(get_random_time())
+        loginuser = browser.find_element(By.XPATH, '//input[@id="username"]')
+        loginpass = browser.find_element(By.ID, "password")
+        loginuser.click()
+        time.sleep(get_random_time())
+        loginuser.send_keys(config.bwuser)
+        loginpass.click()
+        time.sleep(get_random_time())
+        loginpass.send_keys(config.bwpass)
+
+        # Submit login, have to wait for page to change
+        try:
+            loginpass.submit()
+            WebDriverWait(browser, 120).until(EC.url_changes(sign_in_url))
+        except:
+            logger.error("[!] - Unable to authenticate - Check credentials")
+            browser.quit()
+            raise SystemExit
+        time.sleep(get_random_time() * 4)  # Change this to the amount of time you need to solve the captcha manually
+        return browser
     return browser
 
 def get_json_from_session(session: webdriver.Chrome, url: str) -> dict:
@@ -302,6 +307,122 @@ def use_existing_chrome_session():
         sys.exit(1)
 
 
+def download_photos(config: Config, child: Student, session, query_start_date, query_end_date, tz):
+    logger.info(F"[-] - Downloading photos") 
+    page = config.startpage
+    while True:
+        activities_url = f"{config.bwurl}/api/v1/students/{child.id}/activities?page={page}&page_size={config.pagesize}&start_date={query_start_date}&end_date={query_end_date}&action_type=ac_photo&include_parent_actions=true"
+        query = get_json_from_session(session=session, url=activities_url)
+        logger.info('activities %s', query)
+        activities = get_activities(query=query)
+        
+        if len(activities) == 0:
+            logger.info(F"[-] - No activities found on page {page}") 
+            break
+
+        for activity in activities:
+
+            event_date_str = activity["event_date"]                
+            event_date = datetime.strptime(event_date_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=tz)    
+            formatted_event_date = event_date.astimezone(tz=tz).strftime("%Y%m%d")
+            
+            media = activity["media"]
+
+            exif = generate_exif_data(activity, timezone=tz)           
+
+            filename = f"{child.name}_{formatted_event_date}_{media['object_id']}.jpg"
+            image_url = media["image_url"]
+            logger.info(F"[-] - Downloading {image_url}")
+            try:
+                with Image.open(urlopen(image_url)) as img:                        
+                    img.save("./pics/" + filename, exif=exif)
+                    logger.info(F"[-] - Image saved as {filename}")                        
+            except:
+                logger.error(f"[!] - Failed to save {filename}")
+                    
+        page = page + 1
+
+
+def download_videos(config: Config, child: Student, session, query_start_date, query_end_date, tz):
+    logger.info(F"[-] - Downloading videos") 
+    page = config.startpage
+    while True:
+        activities_url = f"{config.bwurl}/api/v1/students/{child.id}/activities?page={page}&page_size={config.pagesize}&start_date={query_start_date}&end_date={query_end_date}&action_type=ac_video&include_parent_actions=true"
+        query = get_json_from_session(session=session, url=activities_url)
+        logger.info('activities %s', query)
+        activities = get_activities(query=query)
+        
+        if len(activities) == 0:
+            logger.info(F"[-] - No activities found on page {page}") 
+            break
+
+        for activity in activities:
+            event_date_str = activity["event_date"]                
+            event_date = datetime.strptime(event_date_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=tz)    
+            formatted_event_date = event_date.astimezone(tz=tz).strftime("%Y%m%d")
+            
+            video_info = activity["video_info"]
+            media = activity["media"]
+
+            filename = f"{child.name}_{formatted_event_date}_{video_info['object_id']}.mp4"
+            video_url = video_info["downloadable_url"]
+            logger.info(F"[-] - Downloading {video_url}")
+            
+            try:
+                # Download video to temporary file first
+                with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_file:
+                    with urlopen(video_url) as response:
+                        temp_file.write(response.read())
+                    temp_video_path = temp_file.name
+                
+                # Prepare metadata for ffmpeg
+                created_date_str = activity["created_at"]        
+                created_date = datetime.strptime(created_date_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=tz)    
+                formatted_created_date = created_date.astimezone(tz=tz).strftime('%Y-%m-%d %H:%M:%S')
+                
+                actor: dict = activity["actor"]
+                teacher_name: str = ""
+                if actor:
+                    first_name: str = actor.get("first_name", "")
+                    last_name: str = actor.get("last_name", "")
+                    teacher_name: str = f"{first_name} {last_name}"
+                
+                note: str = activity.get("note", "")
+                
+                # Use ffmpeg to add metadata
+                output_path = f"./videos/{filename}"
+                cmd = [
+                    'ffmpeg', '-i', temp_video_path,
+                    '-c', 'copy',  # Copy streams without re-encoding
+                    '-metadata', f'creation_time={formatted_created_date}',
+                    '-metadata', f'artist={teacher_name}',
+                    '-metadata', f'comment={note}',
+                    '-metadata', f'description={note}',
+                    '-y',  # Overwrite output file
+                    output_path
+                ]
+                
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if result.returncode == 0:
+                    logger.info(F"[-] - Video saved as {filename}")
+                else:
+                    logger.error(f"[!] - FFmpeg failed for {filename}: {result.stderr}")
+                    # Fallback: save without metadata
+                    with open(output_path, 'wb') as f:
+                        with open(temp_video_path, 'rb') as temp_f:
+                            f.write(temp_f.read())
+                    logger.info(F"[-] - Video saved without metadata as {filename}")
+                
+                # Clean up temporary file
+                os.unlink(temp_video_path)
+                
+            except Exception as e:
+                logger.error(f"[!] - Failed to save {filename}: {e}")
+                    
+        page = page + 1
+
+
 def main():   
     parser = argparse.ArgumentParser(description="Brightwheel Scraper")
     group = parser.add_mutually_exclusive_group(required=True)
@@ -319,9 +440,11 @@ def main():
     else:
         logger.error("[!] - No browser selected, exiting")
 
-     # Check if the ./pics/ directory exists, create it if it doesn't
+     # Check if the ./pics/ and ./videos/ directories exist, create them if they don't
     if not os.path.exists('./pics/'):
         os.makedirs('./pics/')
+    if not os.path.exists('./videos/'):
+        os.makedirs('./videos/')
 
     config = config_parser()
 
@@ -349,38 +472,9 @@ def main():
 
     # Begin fetching and saving images for each child
     for child in config.childids:
-        page = config.startpage
-        while True:
-            activities_url = f"{config.bwurl}/api/v1/students/{child.id}/activities?page={page}&page_size={config.pagesize}&start_date={query_start_date}&end_date={query_end_date}&action_type=ac_photo&include_parent_actions=true"
-            query = get_json_from_session(session=session, url=activities_url)
-            logger.info('activities %s', query)
-            activities = get_activities(query=query)
-            
-            if len(activities) == 0:
-                logger.info(F"[-] - No activities found on page {page}") 
-                break
+        download_photos(config, child, session, query_start_date, query_end_date, tz)
+        download_videos(config, child, session, query_start_date, query_end_date, tz)
 
-            for activity in activities:
-
-                event_date_str = activity["event_date"]                
-                event_date = datetime.strptime(event_date_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=tz)    
-                formatted_event_date = event_date.astimezone(tz=tz).strftime("%Y%m%d")
-                
-                media = activity["media"]
-
-                exif = generate_exif_data(activity, timezone=tz)           
-
-                filename = f"{child.name}_{formatted_event_date}_{media['object_id']}.jpg"
-                image_url = media["image_url"]
-                logger.info(F"[-] - Downloading {image_url}")
-                try:
-                    with Image.open(urlopen(image_url)) as img:                        
-                        img.save("./pics/" + filename, exif=exif)
-                        logger.info(F"[-] - Image saved as {filename}")                        
-                except:
-                    logger.error(f"[!] - Failed to save {filename}")
-                        
-            page = page + 1
     logger.info(F"[-] - Done") 
     session.quit()
 if __name__ == "__main__":
