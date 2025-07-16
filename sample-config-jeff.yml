@@ -1,0 +1,25 @@
+
+bwuser: ''
+bwpass: ''
+bwsignin: 'https://schools.mybrightwheel.com/sign-in'
+bwlist: 'https://schools.mybrightwheel.com/children/list'
+
+startdate: '12/03/2024'
+enddate: '12/04/2025'
+enddatez: '07/14/2025'
+
+startdate_batch4: '07/01/2024'
+enddate_batch4: '12/02/2024'
+
+startdate_batch3: '03/01/2024'
+enddate_batch3: '06/30/2024'
+
+startdate_batch2: '12/06/2023'
+enddate_batch2: '02/29/2024'
+
+startdate_batch1: '08/15/2023'
+enddate_batch1: '12/05/2023'
+
+
+
+
